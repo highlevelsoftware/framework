@@ -36,6 +36,7 @@ class Builder {
 	 */
 	protected $bindings = array(
 		'select' => [],
+		'from'   => [],
 		'join'   => [],
 		'where'  => [],
 		'having' => [],
@@ -279,12 +280,26 @@ class Builder {
 	/**
 	 * Set the table which the query is targeting.
 	 *
-	 * @param  string  $table
+	 * @param  string|array  $table
 	 * @return $this
 	 */
 	public function from($table)
 	{
-		$this->from = $table;
+        if (is_array($table) && count($table) === 1)
+        {
+            reset($table);
+            list($alias, $subquery) = each($table);
+            $bindings = [];
+            if (isset($subquery->joins) && !empty($subquery->joins)) {
+                foreach($subquery->joins as $join) {
+                    $bindings = array_merge($bindings, $join->bindings);
+                }
+            }
+            $this->setBindings(array_merge($bindings, $subquery->getBindings()), 'from');
+            $table = new Expression('(' . $subquery->toSql() . ') AS '. $this->getGrammar()->wrapTable($alias));
+        }
+
+        $this->from = $table;
 
 		return $this;
 	}
@@ -302,14 +317,26 @@ class Builder {
 	 */
 	public function join($table, $one, $operator = null, $two = null, $type = 'inner', $where = false)
 	{
-		// If the first "column" of the join is really a Closure instance the developer
+        if (is_array($table) && count($table) === 1)
+        {
+            reset($table);
+            list($alias, $subquery) = each($table);
+            $this->addBinding($subquery->getBindings(), 'join');
+            $table = new Expression('(' . $subquery->toSql() . ') AS '. $this->getGrammar()->wrapTable($alias));
+        }
+
+        $join = new JoinClause($type, $table);
+
+        if (isset($subquery)) {
+            $join->bindings = $subquery->getBindings();
+        }
+
+        // If the first "column" of the join is really a Closure instance the developer
 		// is trying to build a join with a complex "on" clause containing more than
-		// one condition, so we'll add the join and call a Closure with the query.
+		// one condition, so we'll call a Closure with the query.
 		if ($one instanceof Closure)
 		{
-			$this->joins[] = new JoinClause($type, $table);
-
-			call_user_func($one, end($this->joins));
+			call_user_func($one, $join);
 		}
 
 		// If the column is simply a string, we can assume the join simply has a basic
@@ -317,14 +344,12 @@ class Builder {
 		// this simple join clauses attached to it. There is not a join callback.
 		else
 		{
-			$join = new JoinClause($type, $table);
-
-			$this->joins[] = $join->on(
-				$one, $operator, $two, 'and', $where
-			);
+			$join->on($one, $operator, $two, 'and', $where);
 		}
 
-		return $this;
+        $this->joins[] = $join;
+
+        return $this;
 	}
 
 	/**
@@ -420,8 +445,15 @@ class Builder {
 			{
 				foreach ($column as $key => $value)
 				{
-					$query->where($key, '=', $value);
-				}
+                    if (is_array($value) && count($value) > 1)
+                    {
+                        $query->whereIn($key, $value);
+                    }
+                    else
+                    {
+                        $query->where($key, '=', $value);
+                    }
+                }
 			}, $boolean);
 		}
 
@@ -1275,12 +1307,35 @@ class Builder {
 	/**
 	 * Get the SQL representation of the query.
 	 *
+     * @param  bool  $withBindings
 	 * @return string
 	 */
-	public function toSql()
+	public function toSql($withBindings = false)
 	{
-		return $this->grammar->compileSelect($this);
-	}
+        $sql = $this->grammar->compileSelect($this);
+
+        if ($withBindings)
+        {
+            $conn = $this->connection;
+            $bindings = $conn->prepareBindings($this->bindings);
+            $pdo = $conn->getPdo();
+
+            foreach ($bindings as $type => $type_bindings)
+            {
+                foreach($type_bindings as $i => $binding)
+                {
+                    $bindings[$type][$i] = $pdo->quote($binding) ?: sprintf("'%s'", str_replace("'", "\'", $binding));
+                }
+            }
+
+            // Insert bindings into query
+            $sql = str_replace(['%', '?'], ['%%', '%s'], $sql);
+            $sql = vsprintf($sql, array_flatten($bindings));
+        }
+
+        return $sql;
+
+    }
 
 	/**
 	 * Indicate that the query results should be cached.

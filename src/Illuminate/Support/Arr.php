@@ -25,7 +25,37 @@ class Arr {
 		return $array;
 	}
 
-	/**
+    /**
+     * Brings the grand-children elements up to children level.
+     * Useful for when you've got nested sets of arrays that you want to bring up one level
+     *
+     * @param array $array
+     * @param bool $preserve_keys
+     * @return array
+     */
+    public static function bubble($array, $preserve_keys = true)
+    {
+        $children = [];
+
+        foreach($array as $child)
+        {
+            foreach($child as $key => $grandchild)
+            {
+                if ( ! is_int($key) && $preserve_keys)
+                {
+                    $children[$key] = $grandchild;
+                }
+                else
+                {
+                    $children[] = $grandchild;
+                }
+            }
+        }
+
+        return $children;
+    }
+
+    /**
 	 * Build a new array using a callback.
 	 *
 	 * @param  array     $array

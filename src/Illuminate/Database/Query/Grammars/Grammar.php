@@ -177,7 +177,9 @@ class Grammar extends BaseGrammar {
 	{
 		$first = $this->wrap($clause['first']);
 
-		$second = $clause['where'] ? '?' : $this->wrap($clause['second']);
+		$second = $clause['where']
+                ? sprintf(is_array($clause['second']) ? '(%s)' : '%s', implode(', ', array_fill(0, count((array) $clause['second']), '?')))
+                : $this->wrap($clause['second']);
 
 		return "{$clause['boolean']} $first {$clause['operator']} $second";
 	}

@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Collection;
 
 abstract class HasOneOrMany extends Relation {
 
+    use RelatableTrait;
+
 	/**
 	 * The foreign key of the parent model.
 	 *
@@ -111,7 +113,16 @@ abstract class HasOneOrMany extends Relation {
 			{
 				$value = $this->getRelationValue($dictionary, $key, $type);
 
-				$model->setRelation($relation, $value);
+                if ($type == 'one')
+                {
+                    $this->initRelationsOnModel($value, $model);
+                }
+                else
+                {
+                    $this->initRelationsOnCollection($value, $model);
+                }
+
+                $model->setRelation($relation, $value);
 			}
 		}
 
