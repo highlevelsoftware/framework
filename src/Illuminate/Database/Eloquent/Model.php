@@ -80,14 +80,37 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	 */
 	protected $original = array();
 
-	/**
+    /**
+     * The model attribute's state upon saving.
+     *
+     * @var array
+     */
+    protected $written = array();
+
+
+    /**
 	 * The loaded relationships for the model.
 	 *
 	 * @var array
 	 */
 	protected $relations = array();
 
-	/**
+    /**
+     * The inverse relationship keys for the model (to prevent circular references).
+     *
+     * @var array
+     */
+    protected $inverse_relations = array();
+
+    /**
+     * The relationship to load within collections
+     *
+     * @var array
+     */
+    protected $collection_relations = array();
+
+
+    /**
 	 * The attributes that should be hidden for arrays.
 	 *
 	 * @var array
@@ -1144,7 +1167,9 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	protected function performDeleteOnModel()
 	{
 		$this->newQuery()->where($this->getKeyName(), $this->getKey())->delete();
-	}
+
+        $this->written = [];
+    }
 
 	/**
 	 * Register a saving model event with the dispatcher.
@@ -1393,7 +1418,7 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	{
 		if ( ! $this->exists)
 		{
-			return $this->newQuery()->update($attributes);
+			return false;
 		}
 
 		return $this->fill($attributes)->save();
@@ -1476,7 +1501,18 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 		if (array_get($options, 'touch', true)) $this->touchOwners();
 	}
 
-	/**
+    /**
+     * Records data written to the database
+     *
+     * @param  array  $data
+     * @return void
+     */
+    protected function registerWritten(array $data)
+    {
+        $this->written = array_merge($this->written, $data);
+    }
+
+    /**
 	 * Perform a model update operation.
 	 *
 	 * @param  \Illuminate\Database\Eloquent\Builder  $query
@@ -1485,7 +1521,7 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	 */
 	protected function performUpdate(Builder $query, array $options = [])
 	{
-		$dirty = $this->getDirty();
+		$dirty = $this->getPending();
 
 		if (count($dirty) > 0)
 		{
@@ -1508,13 +1544,17 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 			// Once we have run the update operation, we will fire the "updated" event for
 			// this model instance. This will allow developers to hook into these after
 			// models are updated, giving them a chance to do any special processing.
-			$dirty = $this->getDirty();
+			$dirty = $this->getPending();
 
 			if (count($dirty) > 0)
 			{
 				$this->setKeysForSaveQuery($query)->update($dirty);
 
+                $this->registerWritten($dirty);
+
 				$this->fireModelEvent('updated', false);
+
+				return true;
 			}
 		}
 
@@ -1556,6 +1596,8 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 		else
 		{
 			$query->insert($attributes);
+
+            $this->registerWritten($attributes);
 		}
 
 		// We will go ahead and set the exists property to true, so that it is set when
@@ -1580,6 +1622,8 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 		$id = $query->insertGetId($attributes, $keyName = $this->getKeyName());
 
 		$this->setAttribute($keyName, $id);
+
+        $this->registerWritten(array_merge($attributes, [$keyName => $id]));
 	}
 
 	/**
@@ -2383,7 +2427,7 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	 */
 	protected function getArrayableRelations()
 	{
-		return $this->getArrayableItems($this->relations);
+		return $this->getArrayableItems(array_except($this->relations, array_keys($this->inverse_relations)));
 	}
 
 	/**
@@ -2797,16 +2841,37 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	 */
 	public function getDirty()
 	{
-		$dirty = array();
+        return $this->getDifferences($this->attributes, $this->original);
+    }
 
-		foreach ($this->attributes as $key => $value)
+    /**
+     * Get the attributes that have changed since the last database write
+     *
+     * @return array
+     */
+    public function getPending()
+    {
+        return $this->getDifferences($this->getDirty(), $this->written);
+    }
+
+    /**
+     * Returns all $current properties that don't match $original
+     *
+     * @param  array  $current
+     * @param  array  $original
+     * @return array
+     */
+    protected function getDifferences(array $current, array $original)
+    {
+        $dirty = array();
+
+		foreach ($current as $key => $value)
 		{
-			if ( ! array_key_exists($key, $this->original))
+			if ( ! array_key_exists($key, $original))
 			{
 				$dirty[$key] = $value;
 			}
-			elseif ($value !== $this->original[$key] &&
-                                 ! $this->originalIsNumericallyEquivalent($key))
+			elseif ($value !== $original[$key] && ! $this->isEquivalent($key, $value, $original[$key]))
 			{
 				$dirty[$key] = $value;
 			}
@@ -2816,21 +2881,55 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	}
 
 	/**
-	 * Determine if the new and old values for a given key are numerically equivalent.
+	 * Determine if the current and original values for a given key are equivalent, though not necessarily identical
 	 *
 	 * @param  string  $key
+     * @param  string|int  $current
+     * @param  string|int  $original
 	 * @return bool
 	 */
-	protected function originalIsNumericallyEquivalent($key)
+	protected function isEquivalent($key, $current, $original)
 	{
-		$current = $this->attributes[$key];
+        if (empty($current) != empty($original))
+        {
+            return false;
+        }
 
-		$original = $this->original[$key];
-
-		return is_numeric($current) && is_numeric($original) && strcmp((string) $current, (string) $original) === 0;
+        return $this->isNumericallyEquivalent($current, $original) || $this->isDateEquivalent($key, $current, $original);
 	}
 
-	/**
+    /**
+     * Determine if the current and original values are numerically equivalent.
+     *
+     * @param  mixed   $current
+     * @param  string  $original
+     * @return bool
+     */
+    protected function isNumericallyEquivalent($current, $original)
+    {
+        return is_numeric($current) && is_numeric($original) && strcmp((string) $current, (string) $original) === 0;
+    }
+
+    /**
+     * Determine if the new and old values for a given key have the same date.
+     * Important because the $dates property converts all incoming data into datetime, whereas we may
+     * only want to be storing the date. Thus, any update for the same time would always show as dirty because
+     * 2016-01-01 != 2016-01 01 00:00:00
+     *
+     * This means Eloquent can never add the time if the time was missing, but we assume the database adds
+     * 00:00:00 if there was no time supplied anyway. Eloquent can overwrite the wrong time.
+     *
+     * @param  string  $key
+     * @param  mixed   $current
+     * @param  string  $original
+     * @return bool
+     */
+    protected function isDateEquivalent($key, $current, $original)
+    {
+        return in_array($key, $this->getDates()) && starts_with($this->fromDateTime($current), $original);
+    }
+
+    /**
 	 * Get all the loaded relations for the instance.
 	 *
 	 * @return array
@@ -2865,7 +2964,49 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 		return $this;
 	}
 
-	/**
+    /**
+     * Set an inverse-relationship in the model.
+     *
+     * @param  string  $relation
+     * @param  mixed   $value
+     * @return $this
+     */
+    public function setInverseRelation($relation, $value)
+    {
+        $this->setRelation($relation, $value);
+        $this->inverse_relations[$relation] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Stores a related item ready to populate within a collection
+     *
+     * @param  string $collection
+     * @param  mixed $value
+     * @return $this
+     */
+    public function setCollectionRelation($collection, $value)
+    {
+        $this->collection_relations[$collection][] = $value;
+
+        return $this;
+    }
+
+    /**
+     * Returns array of related models to apply upon a collection
+     *
+     * @param  string $collection
+     * @return array
+     */
+    public function getCollectionRelations($collection)
+    {
+        return isset($this->collection_relations[$collection])
+            ? $this->collection_relations[$collection]
+            : [];
+    }
+
+    /**
 	 * Set the entire relations array on the model.
 	 *
 	 * @param  array  $relations
@@ -2874,6 +3015,8 @@ abstract class Model implements ArrayAccess, ArrayableInterface, JsonableInterfa
 	public function setRelations(array $relations)
 	{
 		$this->relations = $relations;
+
+        $this->inverse_relations = [];
 
 		return $this;
 	}

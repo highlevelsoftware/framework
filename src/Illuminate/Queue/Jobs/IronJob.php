@@ -77,7 +77,7 @@ class IronJob extends Job {
 
 		if (isset($this->job->pushed)) return;
 
-		$this->iron->deleteMessage($this->getQueue(), $this->job->id);
+		$this->iron->deleteMessage($this->getQueue(), $this->job->id, $this->job->reservation_id);
 	}
 
 	/**

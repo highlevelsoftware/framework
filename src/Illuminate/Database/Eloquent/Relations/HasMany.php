@@ -11,7 +11,7 @@ class HasMany extends HasOneOrMany {
 	 */
 	public function getResults()
 	{
-		return $this->query->get();
+		return $this->initRelationsOnCollection($this->query->get());
 	}
 
 	/**

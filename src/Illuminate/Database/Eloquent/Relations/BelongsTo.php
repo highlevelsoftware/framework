@@ -7,7 +7,9 @@ use Illuminate\Database\Eloquent\Collection;
 
 class BelongsTo extends Relation {
 
-	/**
+    use RelatableTrait;
+
+    /**
 	 * The foreign key of the parent model.
 	 *
 	 * @var string
@@ -54,7 +56,7 @@ class BelongsTo extends Relation {
 	 */
 	public function getResults()
 	{
-		return $this->query->first();
+		return $this->initRelationsOnModel($this->query->first());
 	}
 
 	/**

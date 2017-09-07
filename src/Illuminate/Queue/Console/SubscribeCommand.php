@@ -45,7 +45,7 @@ class SubscribeCommand extends Command {
 			throw new RuntimeException("Iron.io based queue must be default.");
 		}
 
-		$iron->getIron()->updateQueue($this->argument('queue'), $this->getQueueOptions());
+        $iron->getIron()->createQueue($this->argument('queue'), $this->getQueueOptions());
 
 		$this->line('<info>Queue subscriber added:</info> <comment>'.$this->argument('url').'</comment>');
 	}
@@ -58,7 +58,7 @@ class SubscribeCommand extends Command {
 	protected function getQueueOptions()
 	{
 		return array(
-			'push_type' => $this->getPushType(), 'subscribers' => $this->getSubscriberList()
+			'type' => $this->getPushType(), 'push' => array('subscribers' => $this->getSubscriberList())
 		);
 	}
 

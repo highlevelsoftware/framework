@@ -93,6 +93,22 @@ if ( ! function_exists('array_add'))
 	}
 }
 
+if ( ! function_exists('array_bubble'))
+{
+    /**
+     * Brings the grand-children elements up to children level.
+     * Useful for when you've got nested sets of arrays that you want to bring up one level
+     *
+     * @param array $array
+     * @param bool $preserve_keys
+     * @return array
+     */
+    function array_bubble($array, $preserve_keys = true)
+    {
+        return Arr::bubble($array, $preserve_keys);
+    }
+}
+
 if ( ! function_exists('array_build'))
 {
 	/**

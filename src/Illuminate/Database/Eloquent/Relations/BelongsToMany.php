@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class BelongsToMany extends Relation {
 
+    use RelatableTrait;
+
 	/**
 	 * The intermediate table for the relation.
 	 *
@@ -78,7 +80,7 @@ class BelongsToMany extends Relation {
 	 */
 	public function getResults()
 	{
-		return $this->get();
+		return $this->initRelationsOnCollection($this->get());
 	}
 
 	/**
@@ -428,6 +430,8 @@ class BelongsToMany extends Relation {
 			if (isset($dictionary[$key = $model->getKey()]))
 			{
 				$collection = $this->related->newCollection($dictionary[$key]);
+
+                $this->initRelationsOnCollection($collection, $model);
 
 				$model->setRelation($relation, $collection);
 			}
