@@ -288,7 +288,7 @@ class Builder {
         if (is_array($table) && count($table) === 1)
         {
             reset($table);
-            list($alias, $subquery) = each($table);
+            list($alias, $subquery) = poly_each($table);
             $bindings = [];
             if (isset($subquery->joins) && !empty($subquery->joins)) {
                 foreach($subquery->joins as $join) {
@@ -320,7 +320,7 @@ class Builder {
         if (is_array($table) && count($table) === 1)
         {
             reset($table);
-            list($alias, $subquery) = each($table);
+            list($alias, $subquery) = poly_each($table);
             $this->addBinding($subquery->getBindings(), 'join');
             $table = new Expression('(' . $subquery->toSql() . ') AS '. $this->getGrammar()->wrapTable($alias));
         }
